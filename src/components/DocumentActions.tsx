@@ -129,6 +129,8 @@ export default function DocumentActions({
   const [processedCount, setProcessedCount] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
   const [isTokenUpload, setIsTokenUpload] = useState(false);
+  // Add a state to track if the upload is being cancelled
+  const [isCancelling, setIsCancelling] = useState(false);
 
   const folderNameInputRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLDivElement>(null);
@@ -203,7 +205,8 @@ export default function DocumentActions({
         setNewFolderName('');
         setError('');
       }
-      if (fileInputRef.current && !fileInputRef.current.contains(event.target as Node)) {
+      if (fileInputRef.current && !fileInputRef.current.contains(event.target as Node) && !isUploading) {
+        // Only close the file input popup if not uploading
         setShowFileInput(false);
         setSelectedFile(null);
         setError('');
@@ -215,7 +218,7 @@ export default function DocumentActions({
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [isUploading]); // Add isUploading as a dependency
 
   // Get available folders for selection
   const getAvailableFolders = (parentId?: string): Folder[] => {
@@ -330,6 +333,12 @@ export default function DocumentActions({
       
       // Simulate upload progress
       const progressInterval = setInterval(() => {
+        // Stop updating progress if cancelling
+        if (isCancelling) {
+          clearInterval(progressInterval);
+          return;
+        }
+        
         setUploadProgress(prev => {
           if (prev >= 90) {
             clearInterval(progressInterval);
@@ -431,6 +440,13 @@ export default function DocumentActions({
         });
       }
       
+      // Check if cancelled before completing the upload
+      if (isCancelling) {
+        console.log('Upload cancelled by user');
+        clearInterval(progressInterval);
+        throw new Error('Upload cancelled by user');
+      }
+      
       clearInterval(progressInterval);
       setUploadProgress(100);
       
@@ -442,7 +458,8 @@ export default function DocumentActions({
         setSelectedFile(null);
         setUploaderName('');
         setSelectedFolderId(currentFolderId);
-        setShowFileInput(false);
+        // Remove this line to keep popup open
+        // setShowFileInput(false);
         setUploadProgress(0);
         setIsTokenUpload(false); // Reset the token upload flag
       }, 1500); // Longer timeout to ensure user sees the completion
@@ -1001,6 +1018,12 @@ export default function DocumentActions({
     updateProgressFn: () => void,
     updatedFolders: Folder[]
   ): Promise<{ successfulUploads: number; failedUploads: number; createdFolders: number }> => {
+    // Check if the upload is being cancelled
+    if (isCancelling) {
+      console.log(`🛑 Upload cancelled during folder processing`);
+      return { successfulUploads: 0, failedUploads: 0, createdFolders: 0 };
+    }
+    
     let successfulUploads = 0;
     let failedUploads = 0;
     let createdFolders = 0;
@@ -1211,6 +1234,9 @@ export default function DocumentActions({
             // Create the folder
             await onCreateFolder(name, parentFolderId);
             console.log(`>> CREATED SUBFOLDER: "${name}" in parent folder: "${folderNode.name}" (ID: "${parentFolderId}")`);
+            
+            // Update progress when creating folders to show activity
+            updateProgressFn();
             
             // Refresh to ensure we get the latest state
             if (onRefresh) {
@@ -1448,6 +1474,12 @@ export default function DocumentActions({
     folderId: string | null | undefined,
     documentType: Document['type']
   ): Promise<{ success: boolean; error?: Error }> => {
+    // Check if upload is being cancelled
+    if (isCancelling) {
+      console.log(`🛑 Upload cancelled for file: "${file.name}"`);
+      return { success: false, error: new Error('Upload cancelled by user') };
+    }
+    
     // Log whether we're uploading to a specific folder or the root
     const targetLocation = folderId ? `folder ID: "${folderId}"` : 'root folder';
     console.log(`Attempting to upload file "${file.name}" to ${targetLocation} with Firebase sync verification`);
@@ -2046,11 +2078,16 @@ export default function DocumentActions({
       let createdFolders = 1; // Starting with 1 for the parent folder
       const totalFilesForUpload = validFiles.length;
       
-      // Set the total count for UI display
-      setTotalCount(totalFilesForUpload);
+      // Set the total count for UI display - include both files and folders for more accurate progress
+      const totalOperations = totalFilesForUpload + totalFolders;
+      setTotalCount(totalOperations);
+      console.log(`Total operations to track progress: ${totalOperations} (${totalFilesForUpload} files + ${totalFolders} folders)`);
       
       // For the UI to show the current progress
       const updateProgress = () => {
+        // Skip updates if cancelling
+        if (isCancelling) return;
+        
         processedFiles++;
         
         // Update our stats
@@ -2060,11 +2097,16 @@ export default function DocumentActions({
         
         setProcessedCount(prev => {
           const newCount = prev + 1;
-          setUploadProgress(Math.floor((newCount / totalCount) * 100));
+          // Use the same ratio for both the counter and the progress bar
+          const progressPercentage = totalCount > 0 ? Math.floor((newCount / totalCount) * 100) : 0;
+          setUploadProgress(progressPercentage);
           return newCount;
         });
         setProcessingFile('');
       };
+      
+      // Initialize progress with a small value to show activity immediately
+      setUploadProgress(1);
       
       console.log('▶️ STARTING FOLDER STRUCTURE PROCESSING...');
       
@@ -2161,15 +2203,7 @@ export default function DocumentActions({
       }
       
       setUploadProgress(100);
-      
-      // Show a final message to the user based on success/failure
-      if (failedUploads > 0) {
-        if (successfulUploads > 0) {
-          setError(`Uploaded ${successfulUploads} files successfully, but ${failedUploads} files failed. Check console for details.`);
-        } else {
-          setError(`Failed to upload all ${failedUploads} files. Check console for details.`);
-        }
-      }
+    
       
       // Verify completion
       const missingFiles = totalFilesForUpload - (successfulUploads + failedUploads);
@@ -2188,7 +2222,8 @@ export default function DocumentActions({
         setCurrentFolderPath('');
         setProcessingFile('');
         setSelectedFolderId(currentFolderId);
-        setShowFileInput(false);
+        // Remove this line to keep popup open
+        // setShowFileInput(false);
         setUploadProgress(0);
         setIsTokenUpload(false); // Reset the token upload flag
       }, 2000); // Longer timeout to ensure user sees the results
@@ -2256,6 +2291,53 @@ export default function DocumentActions({
     
     // If we can't test directly, assume connection is okay based on navigator.onLine
     return true;
+  };
+
+  // Add this useEffect to prevent closing the window during upload
+  useEffect(() => {
+    // Only add the beforeunload event listener if an upload is in progress
+    if (isUploading && uploadProgress > 0 && uploadProgress < 100) {
+      const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+        // Standard way to show a confirmation dialog when leaving page
+        e.preventDefault();
+        e.returnValue = 'You have an upload in progress. Are you sure you want to leave?';
+        return e.returnValue;
+      };
+      
+      window.addEventListener('beforeunload', handleBeforeUnload);
+      
+      return () => {
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+      };
+    }
+  }, [isUploading, uploadProgress]);
+
+  // Add a function to handle upload cancellation
+  const handleCancelUpload = () => {
+    if (isUploading) {
+      setIsCancelling(true);
+      setProcessingFile("Cancelling upload...");
+      
+      // Allow some time for cleanup before resetting states
+      setTimeout(() => {
+        setIsUploading(false);
+        setIsProcessing(false);
+        setUploadProgress(0);
+        setProcessedCount(0);
+        setTotalCount(0);
+        setIsCancelling(false);
+        setProcessingFile('');
+        
+        // Reset upload-related states
+        setShowFileInput(false);
+        setSelectedFile(null);
+        setNewFileName('');
+        setError('');
+        setSelectedFolderId(currentFolderId);
+        setIsFolderUpload(false);
+        setFolderFiles([]);
+      }, 500);
+    }
   };
 
   return (
@@ -2519,25 +2601,48 @@ export default function DocumentActions({
               <div className="mb-4">
                 <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
                   <motion.div
-                    className="h-full bg-blue-500"
+                    className={`h-full ${isCancelling ? 'bg-red-500' : 'bg-blue-500'}`}
                     initial={{ width: 0 }}
                     animate={{ width: `${uploadProgress}%` }}
                   />
                 </div>
                 <div className="flex justify-between mt-1">
                   <p className="text-xs text-gray-500">
-                    {uploadProgress}% uploaded
+                    {isCancelling ? (
+                      <span className="font-medium text-red-600">Cancelling upload...</span>
+                    ) : isFolderUpload ? (
+                      <span className="font-medium">Processing {processedCount}/{totalCount} items</span>
+                    ) : (
+                      <span>{uploadProgress}% uploaded</span>
+                    )}
                   </p>
-                  {isFolderUpload && (
-                    <p className="text-xs text-gray-500">
-                      Processing file {processedCount}/{totalCount}
-                    </p>
-                  )}
                 </div>
                 {isFolderUpload && processingFile && (
                   <p className="text-xs text-gray-500 mt-1 text-center italic truncate max-w-full">
-                    {processingFile}
+                    {isCancelling ? "Cancelling..." : processingFile || "Creating folder structure..."}
                   </p>
+                )}
+                
+                {/* Success message when upload completes */}
+                {uploadProgress === 100 && !isCancelling && (
+                  <div className="mt-3 p-2 bg-green-50 border border-green-200 rounded-md text-center">
+                    <p className="text-sm font-medium text-green-700">Upload completed successfully!</p>
+                    <p className="text-xs text-green-600 mt-1">You can close this dialog or upload more files.</p>
+                  </div>
+                )}
+                
+                {/* Warning message during active upload */}
+                {uploadProgress > 0 && uploadProgress < 100 && !isCancelling && (
+                  <div className="mt-3 p-2 bg-amber-50 border border-amber-200 rounded-md text-center">
+                    <p className="text-xs text-amber-700">Please don't close this dialog during upload</p>
+                  </div>
+                )}
+                
+                {/* Cancellation message */}
+                {isCancelling && (
+                  <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded-md text-center">
+                    <p className="text-xs text-red-700">Cancelling upload, please wait...</p>
+                  </div>
                 )}
               </div>
             )}
@@ -2580,43 +2685,63 @@ export default function DocumentActions({
             )}
 
             <div className="flex justify-end space-x-2">
-              <button
-                onClick={() => {
-                  setShowFileInput(false);
-                  setSelectedFile(null);
-                  setNewFileName('');
-                  setError('');
-                  setSelectedFolderId(currentFolderId);
-                  setIsFolderUpload(false);
-                  setFolderFiles([]);
-                }}
-                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 transition-colors"
-                disabled={isUploading}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={isFolderUpload ? handleFolderUpload : handleCreateDocument}
-                disabled={
-                  (isFolderUpload 
-                    ? folderFiles.length === 0 || !newFileName.trim() 
-                    : !selectedFile || !newFileName.trim() || (!user && !uploaderName.trim())
-                  ) || isUploading
-                }
-                className="px-4 py-2 text-sm text-white bg-blue-500 rounded-md hover:bg-blue-600 transition-colors flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isUploading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Uploading...</span>
-                  </>
-                ) : (
-                  <>
-                    <Upload className="w-4 h-4" />
-                    <span>{isFolderUpload ? 'Upload Folder' : 'Upload'}</span>
-                  </>
-                )}
-              </button>
+              {uploadProgress === 100 ? (
+                // Show "Close" button after upload completes
+                <button
+                  onClick={() => {
+                    setShowFileInput(false);
+                    setSelectedFile(null);
+                    setNewFileName('');
+                    setError('');
+                    setSelectedFolderId(currentFolderId);
+                    setIsFolderUpload(false);
+                    setFolderFiles([]);
+                    setUploadProgress(0);
+                  }}
+                  className="px-4 py-2 text-sm text-white bg-green-500 rounded-md hover:bg-green-600 transition-colors"
+                >
+                  Close
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={isUploading ? handleCancelUpload : () => {
+                      setShowFileInput(false);
+                      setSelectedFile(null);
+                      setNewFileName('');
+                      setError('');
+                      setSelectedFolderId(currentFolderId);
+                      setIsFolderUpload(false);
+                      setFolderFiles([]);
+                    }}
+                    className={`px-4 py-2 text-sm ${isUploading ? 'text-white bg-red-500 hover:bg-red-600' : 'text-gray-600 hover:text-gray-800'} transition-colors`}
+                  >
+                    {isUploading ? 'Cancel Upload' : 'Cancel'}
+                  </button>
+                  <button
+                    onClick={isFolderUpload ? handleFolderUpload : handleCreateDocument}
+                    disabled={
+                      (isFolderUpload 
+                        ? folderFiles.length === 0 || !newFileName.trim() 
+                        : !selectedFile || !newFileName.trim() || (!user && !uploaderName.trim())
+                      ) || isUploading
+                    }
+                    className="px-4 py-2 text-sm text-white bg-blue-500 rounded-md hover:bg-blue-600 transition-colors flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isUploading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Uploading...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-4 h-4" />
+                        <span>{isFolderUpload ? 'Upload Folder' : 'Upload'}</span>
+                      </>
+                    )}
+                  </button>
+                </>
+              )}
             </div>
           </motion.div>
         )}
