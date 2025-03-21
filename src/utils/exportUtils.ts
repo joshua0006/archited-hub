@@ -4,34 +4,56 @@ import { drawAnnotation } from "../utils/drawingUtils";
 import { jsPDF } from "jspdf";
 import { useAnnotationStore } from "../store/useAnnotationStore";
 
+/**
+ * Creates a high-resolution canvas for export with PDF content and annotations
+ */
 export const createExportCanvas = async (
   page: PDFPageProxy,
   scale: number,
-  annotations: Annotation[]
+  annotations: Annotation[],
+  qualityMultiplier: number = 2 // Default to 2x for higher resolution
 ) => {
+  // Create a canvas with higher resolution
   const exportCanvas = document.createElement("canvas");
-  const viewport = page.getViewport({ scale });
+  
+  // Apply the quality multiplier to the viewport scale for higher resolution
+  const exportScale = scale * qualityMultiplier;
+  const viewport = page.getViewport({ scale: exportScale });
+  
+  // Set canvas dimensions to the higher resolution
   exportCanvas.width = viewport.width;
   exportCanvas.height = viewport.height;
-  const ctx = exportCanvas.getContext("2d", { alpha: false })!;
+  
+  const ctx = exportCanvas.getContext("2d", { 
+    alpha: false,
+    willReadFrequently: true // Optimize for potential data reading
+  })!;
+  
+  // Enable high-quality image interpolation
+  if (ctx) {
+    // @ts-ignore - Some browsers may not support these properties
+    ctx.imageSmoothingEnabled = true;
+    // @ts-ignore
+    ctx.imageSmoothingQuality = 'high';
+  }
   
   // Set a white background
   ctx.fillStyle = "white";
   ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
 
-  // Render the PDF page
+  // Render the PDF page with higher quality
   await page.render({
     canvasContext: ctx,
     viewport,
-    intent: "display"
+    intent: "print" // Use print intent for higher quality
   }).promise;
 
-  // Draw annotations in two passes
+  // Draw annotations in two passes at the higher resolution
   // First pass: Draw all non-highlight annotations
   const regularAnnotations = annotations.filter(a => a.type !== 'highlight');
   regularAnnotations.forEach((annotation) => {
     try {
-      drawAnnotation(ctx, annotation, scale);
+      drawAnnotation(ctx, annotation, exportScale);
     } catch (error) {
       console.error("Error drawing annotation:", error, annotation);
     }
@@ -45,7 +67,7 @@ export const createExportCanvas = async (
     
     highlightAnnotations.forEach((annotation) => {
       try {
-        drawAnnotation(ctx, annotation, scale);
+        drawAnnotation(ctx, annotation, exportScale);
       } catch (error) {
         console.error("Error drawing highlight:", error, annotation);
       }
@@ -54,40 +76,125 @@ export const createExportCanvas = async (
     ctx.restore();
   }
 
-  return { canvas: exportCanvas, viewport };
+  // Return both the canvas and viewport dimensions
+  return { 
+    canvas: exportCanvas, 
+    viewport,
+    qualityMultiplier
+  };
 };
 
+/**
+ * Exports the canvas as a PNG file
+ */
 export const exportToPNG = (canvas: HTMLCanvasElement, pageNumber: number) => {
-  const dataUrl = canvas.toDataURL("image/png");
+  // Use maximum quality for PNG export
+  const dataUrl = canvas.toDataURL("image/png", 1.0);
   const a = document.createElement("a");
   a.href = dataUrl;
   a.download = `page-${pageNumber}.png`;
   a.click();
 };
 
+/**
+ * Exports the canvas as a PDF file with optimized quality
+ */
 export const exportToPDF = async (
   canvas: HTMLCanvasElement,
   viewport: { width: number; height: number },
-  pageNumber: number
+  pageNumber: number,
+  qualityMultiplier: number = 2
 ) => {
+  // Create a PDF with dimensions matching the original document (not the scaled-up version)
+  const originalWidth = viewport.width / qualityMultiplier;
+  const originalHeight = viewport.height / qualityMultiplier;
+  
   const pdf = new jsPDF({
-    orientation: viewport.width > viewport.height ? "landscape" : "portrait",
-    unit: "px",
-    format: [viewport.width, viewport.height],
+    orientation: originalWidth > originalHeight ? "landscape" : "portrait",
+    unit: "pt", // Use points for more precise sizing
+    format: [originalWidth, originalHeight],
+    compress: true // Enable compression for smaller file size
   });
 
-  // Add the page with annotations
+  // Add the high-resolution image to the PDF
+  // The image will be automatically scaled down to fit the PDF dimensions
+  // while maintaining the higher quality
   pdf.addImage(
-    canvas.toDataURL("image/png"),
-    "PNG",
+    canvas.toDataURL("image/jpeg", 0.95), // Use JPEG with 95% quality for better compression
+    "JPEG",
     0,
     0,
-    viewport.width,
-    viewport.height
+    originalWidth,
+    originalHeight
   );
 
-  // Save the PDF
-  pdf.save(`annotated-page-${pageNumber}.pdf`);
+  // Save the PDF with a more descriptive name
+  pdf.save(`annotated-page-${pageNumber}-high-quality.pdf`);
+};
+
+/**
+ * Creates a high-quality multi-page PDF with all pages and annotations
+ */
+export const createHighQualityPDF = async (
+  pdf: any,
+  pages: number,
+  getPageAnnotations: (pageNum: number) => Annotation[],
+  qualityMultiplier: number = 2
+) => {
+  // Create a combined PDF document
+  const firstPage = await pdf.getPage(1);
+  const viewport = firstPage.getViewport({ scale: 1 });
+  
+  const combinedPDF = new jsPDF({
+    orientation: viewport.width > viewport.height ? "landscape" : "portrait",
+    unit: "pt",
+    format: [viewport.width, viewport.height],
+    compress: true
+  });
+  
+  // Process each page
+  for (let pageNum = 1; pageNum <= pages; pageNum++) {
+    try {
+      // Get the page
+      const page = await pdf.getPage(pageNum);
+      
+      // Get annotations for this page
+      const annotations = getPageAnnotations(pageNum);
+      
+      // Create high-resolution canvas
+      const { canvas } = await createExportCanvas(
+        page,
+        1.0, // Base scale
+        annotations,
+        qualityMultiplier
+      );
+      
+      // Add a new page for all pages after the first
+      if (pageNum > 1) {
+        combinedPDF.addPage([viewport.width, viewport.height]);
+      }
+      
+      // Add the high-resolution image to the PDF
+      combinedPDF.addImage(
+        canvas.toDataURL("image/jpeg", 0.95),
+        "JPEG",
+        0,
+        0,
+        viewport.width,
+        viewport.height
+      );
+      
+      // Clean up
+      canvas.width = 0;
+      canvas.height = 0;
+      
+    } catch (error) {
+      console.error(`Error processing page ${pageNum}:`, error);
+      throw error;
+    }
+  }
+  
+  return combinedPDF;
 };
 
 // Export annotations to JSON

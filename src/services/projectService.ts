@@ -26,6 +26,7 @@ import {
 } from "firebase/storage";
 import { db, storage } from "../lib/firebase";
 import { Document, Project } from "../types";
+import { documentService } from "./documentService";
 
 const COLLECTION = "projects";
 
@@ -377,31 +378,45 @@ export const projectService = {
     async getAll(projectId: string): Promise<Document[]> {
       try {
         console.log("Fetching documents for project:", projectId);
-        const docsRef = collection(db, `folders/${projectId}/documents`);
-        const snapshot = await getDocs(docsRef);
-
-        const documents = snapshot.docs
-          .filter((doc) => doc.id !== "_metadata")
-          .map((doc) => {
-            const data = doc.data();
-            console.log("Raw document data:", data);
-
-            return {
-              id: doc.id,
-              projectId,
-              name: data.name || "",
-              type: data.type || "pdf",
-              folderId: data.metadata?.folderId || data.folderId || "",
-              version: data.metadata?.version || data.version || 1,
-              dateModified:
-                data.dateModified ||
-                data.updatedAt?.toDate?.()?.toISOString() ||
-                new Date().toISOString(),
-              url: data.url || "",
-            };
-          });
-
-        return documents;
+        
+        // First, get all folders for this project
+        const q = query(
+          collection(db, "folders"),
+          where("projectId", "==", projectId)
+        );
+        const foldersSnapshot = await getDocs(q);
+        
+        // Then get documents from each folder
+        const allDocs: Document[] = [];
+        
+        for (const folderDoc of foldersSnapshot.docs) {
+          const folderId = folderDoc.id;
+          const docsRef = collection(db, `folders/${folderId}/documents`);
+          const docsSnapshot = await getDocs(docsRef);
+          
+          const folderDocs = docsSnapshot.docs
+            .filter((doc) => doc.id !== "_metadata")
+            .map((doc) => {
+              const data = doc.data();
+              return {
+                id: doc.id,
+                name: data.name || "",
+                type: data.type || "pdf",
+                folderId: folderId,
+                version: data.version || 1,
+                dateModified:
+                  data.dateModified ||
+                  data.updatedAt?.toDate?.()?.toISOString() ||
+                  new Date().toISOString(),
+                url: data.url || "",
+                metadata: data.metadata || {}
+              } as Document;
+            });
+            
+          allDocs.push(...folderDocs);
+        }
+        
+        return allDocs;
       } catch (error) {
         console.error("Error getting documents:", error);
         throw new Error("Failed to get documents");
@@ -413,309 +428,83 @@ export const projectService = {
       document: Omit<Document, "id" | "url">,
       file: File
     ): Promise<Document> {
-      if (!projectId) {
-        throw new Error("Project ID is required");
+      if (!document.folderId) {
+        throw new Error("Folder ID is required");
       }
 
       try {
-        console.log("Creating document:", { projectId, document, file });
-
-        // Get folder information if a folderId is provided
-        let folderPath = "";
-        let folderMetadata = null;
-
-        if (document.folderId) {
-          const folderRef = doc(db, "folders", document.folderId);
-          const folderSnap = await getDoc(folderRef);
-
-          if (folderSnap.exists()) {
-            const folderData = folderSnap.data();
-            folderPath = folderData.metadata?.path || "";
-            folderMetadata = {
-              folderId: document.folderId,
-              folderPath: folderData.metadata?.path,
-              folderName: folderData.name,
-              folderLevel: folderData.metadata?.level || 0,
-            };
-          }
-        }
-
-        // Generate unique filename
-        const timestamp = Date.now();
-        const uniqueFilename = `${timestamp}-${file.name.replace(
-          /[^a-zA-Z0-9.-]/g,
-          "_"
-        )}`;
-
-        // Create storage path including folder structure
-        const storagePath = `folders/${folderPath}/${uniqueFilename}`;
-
-        // Upload file to Storage with metadata
-        const storageRef = ref(storage, storagePath);
-        const metadata = {
-          contentType: file.type,
-          customMetadata: {
-            originalFilename: file.name,
-            projectId,
-            folderId: document.folderId || "",
-            folderPath: folderPath || "",
-            version: "1",
-          },
-        };
-
-        console.log("Uploading file to storage:", { storagePath, metadata });
-        const uploadResult = await uploadBytes(storageRef, file, metadata);
-        const url = await getDownloadURL(uploadResult.ref);
-        console.log("File uploaded successfully:", { url });
-
-        // Create document data
-        const documentData: DocumentData = {
-          name: document.name,
-          type: "pdf",
-          url,
-          storagePath,
-          dateModified: new Date().toISOString(),
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          folderId: document.folderId || "",
-          version: 1,
-          metadata: {
-            projectId,
-            folderId: document.folderId || null,
-            folderInfo: folderMetadata,
-            originalFilename: file.name,
-            contentType: file.type,
-            size: file.size,
-            path: storagePath,
-            version: 1,
-          },
-        };
-
-        // Create document in Firestore
-        console.log("Creating Firestore document:", documentData);
-        const docsRef = collection(db, `${COLLECTION}/${projectId}/documents`);
-        const docRef = await addDoc(docsRef, documentData);
-
-        // Create initial version record
-        const versionsRef = collection(docRef, "versions");
-        await addDoc(versionsRef, {
-          version: 1,
-          url,
-          storagePath,
-          uploadedAt: serverTimestamp(),
-          metadata: {
-            originalFilename: file.name,
-            contentType: file.type,
-            size: file.size,
-            folderId: document.folderId || null,
-            folderInfo: folderMetadata,
-          },
-        });
-
-        // Update metadata document
-        const metadataRef = doc(
-          db,
-          `${COLLECTION}/${projectId}/documents/_metadata`
+        // Redirect to documentService.create which handles the new structure
+        return await documentService.create(
+          document.folderId,
+          document,
+          file
         );
-        await updateDoc(metadataRef, {
-          totalDocuments: increment(1),
-          lastUpdated: serverTimestamp(),
-        });
-
-        // Return the new document
-        const newDocument: Document = {
-          id: docRef.id,
-          projectId,
-          name: document.name,
-          type: "pdf",
-          folderId: document.folderId || "",
-          version: 1,
-          dateModified: new Date().toISOString(),
-          url,
-        };
-
-        console.log("Document created successfully:", newDocument);
-        return newDocument;
       } catch (error) {
         console.error("Error creating document:", error);
-        throw new Error("Failed to create document. Please try again.");
+        throw error;
       }
     },
 
     async updateFile(
       projectId: string,
       documentId: string,
-      file: File
+      file: File,
+      folderId: string
     ): Promise<string> {
       try {
-        const docRef = doc(
-          db,
-          `${COLLECTION}/${projectId}/documents`,
-          documentId
-        );
-        const docSnap = await getDoc(docRef);
-
-        if (!docSnap.exists()) {
-          throw new Error("Document not found");
-        }
-
-        const document = { id: docSnap.id, ...docSnap.data() } as Document & {
-          storagePath?: string;
-          metadata?: {
-            version: number;
-            folderId: string | null;
-          };
-        };
-
-        const timestamp = Date.now();
-        const uniqueFilename = `${timestamp}-${file.name.replace(
-          /[^a-zA-Z0-9.-]/g,
-          "_"
-        )}`;
-
-        const folderPath = document.folderId ? `${document.folderId}/` : "";
-        const storagePath = `projects/${projectId}/documents/${folderPath}${uniqueFilename}`;
-
-        const storageRef = ref(storage, storagePath);
-        const metadata = {
-          contentType: file.type,
-          customMetadata: {
-            originalFilename: file.name,
-            projectId,
-            folderId: document.folderId || "",
-            version: String((document.metadata?.version || 1) + 1),
-          },
-        };
-
-        const uploadResult = await uploadBytes(storageRef, file, metadata);
-        const url = await getDownloadURL(uploadResult.ref);
-
-        const pdfCollectionRef = collection(docRef, "versions");
-        await addDoc(pdfCollectionRef, {
-          version: (document.metadata?.version || 1) + 1,
-          url,
-          storagePath,
-          uploadedAt: serverTimestamp(),
-          metadata: {
-            originalFilename: file.name,
-            contentType: file.type,
-            size: file.size,
-          },
-        });
-
-        await updateDoc(docRef, {
-          url,
-          storagePath,
-          dateModified: new Date().toISOString(),
-          updatedAt: serverTimestamp(),
-          metadata: {
-            ...document.metadata,
-            version: (document.metadata?.version || 1) + 1,
-            originalFilename: file.name,
-            contentType: file.type,
-            size: file.size,
-            path: storagePath,
-            lastModified: new Date().toISOString(),
-          },
-        });
-
-        return url;
+        // Redirect to documentService.updateFile
+        return await documentService.updateFile(folderId, documentId, file);
       } catch (error) {
         console.error("Error updating document file:", error);
-        throw new Error("Failed to update document file. Please try again.");
+        throw error;
       }
     },
 
-    async delete(projectId: string, documentId: string): Promise<void> {
+    async delete(projectId: string, documentId: string, folderId: string): Promise<void> {
       try {
-        const docRef = doc(
-          db,
-          `${COLLECTION}/${projectId}/documents`,
-          documentId
-        );
-        const docSnap = await getDoc(docRef);
-
-        if (docSnap.exists()) {
-          const document = { id: docSnap.id, ...docSnap.data() } as Document & {
-            storagePath?: string;
-          };
-
-          const versionsRef = collection(docRef, "versions");
-          const versionsSnapshot = await getDocs(versionsRef);
-
-          const deletePromises = versionsSnapshot.docs.map(
-            async (versionDoc) => {
-              const versionData = versionDoc.data();
-              if (versionData.storagePath) {
-                try {
-                  const fileRef = ref(storage, versionData.storagePath);
-                  await deleteObject(fileRef);
-                } catch (error) {
-                  console.warn("File not found:", error);
-                }
-              }
-              return deleteDoc(versionDoc.ref);
-            }
-          );
-
-          await Promise.all(deletePromises);
-
-          await deleteDoc(docRef);
-
-          const metadataRef = doc(
-            db,
-            `${COLLECTION}/${projectId}/documents/_metadata`
-          );
-          await updateDoc(metadataRef, {
-            totalDocuments: increment(-1),
-            lastUpdated: serverTimestamp(),
-          });
-        }
+        // Redirect to documentService.delete
+        await documentService.delete(folderId, documentId);
       } catch (error) {
         console.error("Error deleting document:", error);
-        throw new Error("Failed to delete document");
+        throw error;
       }
     },
 
-    async getVersions(projectId: string, documentId: string): Promise<any[]> {
+    async getVersions(projectId: string, documentId: string, folderId: string): Promise<any[]> {
       try {
-        const docRef = doc(
-          db,
-          `${COLLECTION}/${projectId}/documents`,
-          documentId
-        );
-        const versionsRef = collection(docRef, "versions");
-        const snapshot = await getDocs(versionsRef);
-
-        return snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
+        // Redirect to documentService.getVersions
+        return await documentService.getVersions(folderId, documentId);
       } catch (error) {
         console.error("Error getting document versions:", error);
-        throw new Error("Failed to get document versions");
+        return [];
       }
-    },
+    }
   },
 
   async deleteProject(projectId: string): Promise<void> {
-    const project = await this.getProject(projectId);
+    try {
+      const projectRef = doc(db, COLLECTION, projectId);
+      const projectSnap = await getDoc(projectRef);
 
-    if (!project) {
-      throw new Error("Project not found");
+      if (!projectSnap.exists()) {
+        throw new Error("Project not found");
+      }
+
+      const project = { id: projectSnap.id, ...projectSnap.data() } as Project;
+
+      // If project is archived, activate it first
+      if (project.status === "archived") {
+        await updateDoc(projectRef, {
+          status: "active",
+          updatedAt: serverTimestamp()
+        });
+      }
+
+      // Delete the project document
+      await deleteDoc(projectRef);
+    } catch (error) {
+      console.error("Error deleting project:", error);
+      throw error;
     }
-
-    // If project is archived, activate it first
-    if (project.status === "archived") {
-      await this.prisma.project.update({
-        where: { id: projectId },
-        data: { status: "active" },
-      });
-    }
-
-    // Delete the project immediately
-    await this.prisma.project.delete({
-      where: { id: projectId },
-    });
   },
 };

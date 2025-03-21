@@ -1,4 +1,6 @@
 // Document types
+import { Timestamp } from 'firebase/firestore';
+
 export interface DocumentComment {
   id: string;
   documentId: string;
@@ -12,7 +14,6 @@ export interface DocumentComment {
 
 export interface Document {
   id: string;
-  projectId: string;
   name: string;
   type: 'pdf' | 'dwg' | 'other';
   folderId: string;
@@ -24,6 +25,10 @@ export interface Document {
     size?: number;
     contentType?: string;
     originalFilename?: string;
+    googleDriveId?: string;
+    createdAt?: string;
+    updatedAt?: string;
+    storagePath?: string;
   };
 }
 
@@ -184,7 +189,7 @@ export interface ShareToken {
   id: string;
   resourceId: string;
   type: 'file' | 'folder';
-  expiresAt: Date | firebase.firestore.Timestamp;
+  expiresAt: Date | Timestamp;
   permissions: string[];
   creatorId: string;
   createdAt: Date;

@@ -32,15 +32,19 @@ export const folderService = {
       const folderSnapshot = await getDocs(foldersQuery);
       if (!folderSnapshot.empty) return true;
 
-      // Check documents with same name
-      const documentsQuery = query(
-        collection(db, 'documents'),
-        where('projectId', '==', projectId),
-        where('folderId', '==', parentId || null),
-        where('name', '==', name)
-      );
-      const documentSnapshot = await getDocs(documentsQuery);
-      return !documentSnapshot.empty;
+      // If we have a parent folder, check its documents subcollection
+      if (parentId) {
+        const parentRef = doc(db, COLLECTION, parentId);
+        const documentsRef = collection(parentRef, 'documents');
+        const documentsQuery = query(
+          documentsRef,
+          where('name', '==', name)
+        );
+        const documentSnapshot = await getDocs(documentsQuery);
+        return !documentSnapshot.empty;
+      }
+      
+      return false;
     } catch (error) {
       console.error('Error checking name existence:', error);
       throw new Error('Failed to check name existence');

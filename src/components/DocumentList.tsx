@@ -249,7 +249,8 @@ export default function DocumentList({
 
   const renderBreadcrumbs = () => {
     if (selectedDocument) {
-      const currentFolder = folders.find(
+      const foldersList = isSharedView ? sharedFolders || [] : folders;
+      const currentFolder = foldersList.find(
         (f) => f.id === selectedDocument.folderId
       );
 
@@ -289,7 +290,7 @@ export default function DocumentList({
 
     return (
       <DocumentBreadcrumbs
-        folders={folders}
+        folders={isSharedView ? sharedFolders || [] : folders}
         currentFolder={currentFolder}
         onNavigate={handleBreadcrumbNavigation}
       />
@@ -563,24 +564,30 @@ export default function DocumentList({
                     </div>
                   </button>
                   {!isSharedView && (
-                    <div className="flex items-center space-x-1">
+                    <div className="flex items-center gap-2">
                       <button
                         onClick={() => openRenameDialog(doc.id, 'document', doc.name)}
-                        className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
+                        className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 relative group"
+                        title="Rename"
                       >
-                        <Pencil className="w-4 h-4" />
+                        <Pencil className="w-5 h-5" />
+                        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 text-xs text-white bg-gray-800 rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap">Rename</span>
                       </button>
                       <button
                         onClick={() => confirmDelete(doc.id, 'document', doc.name)}
-                        className="p-1 text-gray-400 hover:text-red-600 rounded-full hover:bg-gray-100"
+                        className="p-1 text-gray-400 hover:text-red-600 rounded-full hover:bg-gray-100 relative group"
+                        title="Delete"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="w-5 h-5" />
+                        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 text-xs text-white bg-gray-800 rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap">Delete</span>
                       </button>
                       <button
                         onClick={() => handleShare(doc.id, false)}
-                        className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
+                        className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 relative group"
+                        title="Share"
                       >
-                        <Share2 className="w-4 h-4" />
+                        <Share2 className="w-5 h-5" />
+                        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 text-xs text-white bg-gray-800 rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap">Share</span>
                       </button>
                     </div>
                   )}

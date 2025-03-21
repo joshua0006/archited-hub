@@ -331,24 +331,44 @@ export const drawText = (
   style: AnnotationStyle,
   scale: number
 ) => {
-  if (!points.length || !style.text) return;
-  const [start] = points;
-
-  // Save context state
-  ctx.save();
-
-  // Set text styles with proper scaling
-  const fontSize = 14 * scale;
-  ctx.font = `${fontSize}px Arial`;
+  if (!points || !points.length || !style.text) return;
+  
+  const position = points[0];
+  const { text, textOptions = {} } = style;
+  
+  const fontSize = (textOptions.fontSize || 14) * scale;
+  const fontFamily = textOptions.fontFamily || 'Arial';
+  
+  // Set font style
+  let fontStyle = '';
+  if (textOptions.bold) fontStyle += 'bold ';
+  if (textOptions.italic) fontStyle += 'italic ';
+  
+  ctx.font = `${fontStyle}${fontSize}px ${fontFamily}`;
   ctx.fillStyle = style.color;
   ctx.globalAlpha = style.opacity;
-  ctx.textBaseline = "top";
-
-  // Draw text at scaled position
-  ctx.fillText(style.text, start.x * scale, start.y * scale);
-
-  // Restore context state
-  ctx.restore();
+  
+  // Split text by newlines and draw each line
+  const lines = text.split('\n');
+  const lineHeight = fontSize * 1.2;
+  
+  lines.forEach((line, i) => {
+    ctx.fillText(line, position.x * scale, (position.y + i * lineHeight / scale) * scale);
+  });
+  
+  // Add underline if needed
+  if (textOptions.underline) {
+    ctx.beginPath();
+    lines.forEach((line, i) => {
+      const metrics = ctx.measureText(line);
+      const y = (position.y + i * lineHeight / scale) * scale + 3;
+      ctx.moveTo(position.x * scale, y);
+      ctx.lineTo(position.x * scale + metrics.width, y);
+    });
+    ctx.strokeStyle = style.color;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
 };
 
 // Update sticky note drawing function
@@ -358,69 +378,81 @@ export const drawStickyNote = (
   style: AnnotationStyle,
   scale: number
 ) => {
-  if (!points.length || !style.text) return;
-  const [start] = points;
-
-  // Scale dimensions
-  const padding = 8 * scale;
-  const noteWidth = 200 * scale;
-  const fontSize = 14 * scale;
-  const lineHeight = 20 * scale;
-  const lines = style.text.split("\n");
-  const noteHeight = Math.max(100 * scale, lines.length * lineHeight + padding * 2);
-
-  // Calculate scaled position
-  const x = start.x * scale;
-  const y = start.y * scale;
-
-  // Save context state
+  if (!points || !points.length) return;
+  
+  const position = points[0];
+  const { text = '', textOptions = {} } = style;
+  
+  // Define sticky note dimensions
+  const width = 200 * scale;
+  const height = 150 * scale;
+  const cornerSize = 20 * scale;
+  
+  // Draw the note background
   ctx.save();
-
-  // Draw note background
-  ctx.fillStyle = "#FFEB3B"; // Yellow sticky note color
-  ctx.globalAlpha = 0.8; // Slightly transparent
+  
+  // Fixed style for sticky notes - ignore user style
+  const noteColor = '#FFD700'; // Always yellow
+  
+  ctx.fillStyle = noteColor;
+  ctx.globalAlpha = 1.0; // Fixed opacity
+  
+  // Shadow
   ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
   ctx.shadowBlur = 5 * scale;
   ctx.shadowOffsetX = 2 * scale;
   ctx.shadowOffsetY = 2 * scale;
   
-  // Draw rounded rectangle
-  const radius = 4 * scale;
+  // Main rectangle
   ctx.beginPath();
-  ctx.moveTo(x + radius, y);
-  ctx.lineTo(x + noteWidth - radius, y);
-  ctx.quadraticCurveTo(x + noteWidth, y, x + noteWidth, y + radius);
-  ctx.lineTo(x + noteWidth, y + noteHeight - radius);
-  ctx.quadraticCurveTo(x + noteWidth, y + noteHeight, x + noteWidth - radius, y + noteHeight);
-  ctx.lineTo(x + radius, y + noteHeight);
-  ctx.quadraticCurveTo(x, y + noteHeight, x, y + noteHeight - radius);
-  ctx.lineTo(x, y + radius);
-  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.moveTo(position.x * scale, position.y * scale);
+  ctx.lineTo(position.x * scale + width - cornerSize, position.y * scale);
+  ctx.lineTo(position.x * scale + width, position.y * scale + cornerSize);
+  ctx.lineTo(position.x * scale + width, position.y * scale + height);
+  ctx.lineTo(position.x * scale, position.y * scale + height);
   ctx.closePath();
   ctx.fill();
   
-  // Reset shadow and opacity for text
+  // Draw the folded corner
+  ctx.beginPath();
+  ctx.moveTo(position.x * scale + width - cornerSize, position.y * scale);
+  ctx.lineTo(position.x * scale + width - cornerSize, position.y * scale + cornerSize);
+  ctx.lineTo(position.x * scale + width, position.y * scale + cornerSize);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+  ctx.fill();
+  
+  // Reset shadow for text
   ctx.shadowColor = 'transparent';
   ctx.shadowBlur = 0;
   ctx.shadowOffsetX = 0;
   ctx.shadowOffsetY = 0;
-  ctx.globalAlpha = 1;
-
-  // Draw text
-  ctx.fillStyle = "#000000"; // Black text on yellow background
-  ctx.font = `${fontSize}px Arial`;
-  ctx.textBaseline = "top";
-
-  // Draw each line of text
-  lines.forEach((line, index) => {
-    ctx.fillText(
-      line,
-      x + padding,
-      y + padding + index * lineHeight
-    );
-  });
-
-  // Restore context state
+  
+  // Draw the text
+  if (text) {
+    // Fixed font style for sticky notes
+    const fontSize = 14 * scale; // Fixed font size
+    const fontFamily = 'Arial';  // Fixed font family
+    
+    ctx.font = `${fontSize}px ${fontFamily}`;
+    ctx.fillStyle = '#000000'; // Black text on sticky note
+    ctx.globalAlpha = 1.0;
+    
+    // Calculate text area with padding
+    const padding = 10 * scale;
+    const textX = position.x * scale + padding;
+    const textY = position.y * scale + padding + fontSize * 0.8; // Adjust for baseline
+    
+    // Split text by newlines and draw each line
+    const lines = text.split('\n');
+    const lineHeight = fontSize * 1.2;
+    
+    lines.forEach((line, i) => {
+      const maxWidth = width - 2 * padding;
+      ctx.fillText(line, textX, textY + i * lineHeight, maxWidth);
+    });
+  }
+  
   ctx.restore();
 };
 
@@ -440,6 +472,14 @@ export type AnnotationStyle = {
   circleDiameterMode?: boolean;
   stampType?: StampType;
   text?: string;
+  textOptions?: {
+    fontSize?: number;
+    fontFamily?: string;
+    bold?: boolean;
+    italic?: boolean;
+    underline?: boolean;
+  };
+  stampSize?: number;
 };
 
 // Add highlight drawing function
@@ -881,10 +921,14 @@ export const drawStamp = (
   const x = start.x * scale;
   const y = start.y * scale;
   
-  // Size proportions - adjusted by scale
-  const stampWidth = 180 * scale;
-  const stampHeight = 50 * scale;
-  const borderRadius = 6 * scale;
+  // Get stamp size from style or use default (100%)
+  const stampSizePercent = style.stampSize || 100;
+  const sizeMultiplier = stampSizePercent / 100;
+  
+  // Size proportions - adjusted by scale and size percentage
+  const stampWidth = 180 * scale * sizeMultiplier;
+  const stampHeight = 50 * scale * sizeMultiplier;
+  const borderRadius = 6 * scale * sizeMultiplier;
 
   // Save context state
   ctx.save();
@@ -933,8 +977,8 @@ export const drawStamp = (
   ctx.stroke();
   
   // Calculate text and icon dimensions
-  const iconSize = 22 * scale;
-  const textSize = 20 * scale;
+  const iconSize = 22 * scale * sizeMultiplier;
+  const textSize = 20 * scale * sizeMultiplier;
   const text = style.stampType.toUpperCase();
   
   // Set text font for measurement
@@ -946,7 +990,7 @@ export const drawStamp = (
   const iconWidth = ctx.measureText(icon).width;
   
   // Calculate spacing between icon and text
-  const spacing = 15 * scale;
+  const spacing = 15 * scale * sizeMultiplier;
   const totalContentWidth = iconWidth + spacing + textWidth;
   
   // Calculate positions to center the content
@@ -969,7 +1013,7 @@ export const drawStamp = (
   ctx.restore();
 };
 
-// Update isPointInStamp to use scale
+// Update isPointInStamp to use scale and stampSize
 export const isPointInStamp = (
   point: Point,
   annotation: Annotation,
@@ -978,23 +1022,29 @@ export const isPointInStamp = (
   if (!annotation.points.length) return false;
 
   const [start] = annotation.points;
-  const stampWidth = 180; // Updated to match the new stamp width
-  const stampHeight = 50; // Updated to match the new stamp height
+  
+  // Get stamp size percentage from style or use default (100%)
+  const stampSizePercent = annotation.style.stampSize || 100;
+  const sizeMultiplier = stampSizePercent / 100;
+  
+  // Base stamp dimensions
+  const stampWidth = 180 * sizeMultiplier; 
+  const stampHeight = 50 * sizeMultiplier;
 
   // Calculate the bounds of the stamp
-  const left = (start.x - stampWidth / 2) * scale;
-  const right = (start.x + stampWidth / 2) * scale;
-  const top = (start.y - stampHeight / 2) * scale;
-  const bottom = (start.y + stampHeight / 2) * scale;
+  const left = (start.x - stampWidth / 2);
+  const right = (start.x + stampWidth / 2);
+  const top = (start.y - stampHeight / 2);
+  const bottom = (start.y + stampHeight / 2);
   
   // Add a small padding for easier selection
-  const padding = 5 * scale;
+  const padding = 5;
 
   return (
-    point.x * scale >= left - padding &&
-    point.x * scale <= right + padding &&
-    point.y * scale <= bottom + padding &&
-    point.y * scale >= top - padding
+    point.x >= left - padding &&
+    point.x <= right + padding &&
+    point.y <= bottom + padding &&
+    point.y >= top - padding
   );
 };
 
@@ -1035,8 +1085,14 @@ export const drawSelectionOutline = (
              type === "stampRejected" || type === "stampRevision") {
     // Specific handling for stamp annotations
     const [start] = annotation.points;
-    const stampWidth = 180 * scale;
-    const stampHeight = 50 * scale;
+    
+    // Get stamp size percentage from style or use default (100%)
+    const stampSizePercent = annotation.style.stampSize || 100;
+    const sizeMultiplier = stampSizePercent / 100;
+    
+    // Size proportions adjusted by scale and size percentage
+    const stampWidth = 180 * scale * sizeMultiplier;
+    const stampHeight = 50 * scale * sizeMultiplier;
     
     // Draw selection rectangle around the stamp
     ctx.beginPath();
@@ -1416,3 +1472,4 @@ export const isPointInsideCircle = (
   // Check if point is within the circle
   return distance <= radius;
 };
+

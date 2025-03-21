@@ -14,6 +14,7 @@ import {
   importAnnotations,
   saveAnnotations,
   loadAnnotations,
+  createHighQualityPDF,
 } from "../utils/exportUtils";
 import { drawAnnotation } from "../utils/drawingUtils";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
@@ -143,6 +144,87 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     return page.getViewport({ scale });
   }, [page, scale]);
 
+  // Add these refs near the top with other refs
+  const pdfLoadLogTimestampRef = useRef<number>(0);
+  const pdfVerifiedRef = useRef<boolean>(false);
+
+  // Add a reusable renderStampAnnotations function to ensure stamps appear correctly
+  const renderStampAnnotations = useCallback(() => {
+    if (!canvasRef.current || !pdf || !page || !viewport) {
+      return;
+    }
+
+    // Get all stamp annotations for the current page
+    const stampTypes = ['stamp', 'stampApproved', 'stampRejected', 'stampRevision'];
+    const stamps = annotationStore.documents[documentId]?.annotations?.filter(
+      (a: Annotation) => stampTypes.includes(a.type) && a.pageNumber === currentPage
+    ) || [];
+
+    if (stamps.length === 0) {
+      return; // No stamps to render
+    }
+
+    console.log(`[PDFViewer] Rendering ${stamps.length} stamp annotations directly`);
+
+    // Get annotation canvas for direct rendering
+    const annotationCanvas = document.querySelector('.annotation-canvas-container canvas') as HTMLCanvasElement;
+    if (!annotationCanvas) {
+      console.warn('[PDFViewer] No annotation canvas found for stamp rendering');
+      return;
+    }
+
+    const ctx = annotationCanvas.getContext('2d');
+    if (!ctx) {
+      console.warn('[PDFViewer] Could not get context from annotation canvas');
+      return;
+    }
+
+    // Draw each stamp annotation
+    stamps.forEach((stamp) => {
+      try {
+        drawAnnotation(ctx, stamp, scale);
+        console.log(`[PDFViewer] Drew stamp at ${stamp.points[0].x}, ${stamp.points[0].y} with type ${stamp.type}`);
+      } catch (error) {
+        console.error('[PDFViewer] Error drawing stamp:', error);
+      }
+    });
+  }, [annotationStore, documentId, currentPage, pdf, page, viewport, scale]);
+
+  // Add function to force render stamps when needed
+  const forceRenderStamps = useCallback(() => {
+    // First call the regular stamp render function
+    renderStampAnnotations();
+    
+    // Then force a full redraw of the annotation canvas
+    const annotationCanvas = document.querySelector('.annotation-canvas-container canvas') as HTMLCanvasElement;
+    if (annotationCanvas) {
+      // Set force render flag
+      annotationCanvas.dataset.forceRender = 'true';
+      
+      // Dispatch events to ensure stamps are rendered
+      const event = new CustomEvent('annotationChanged', {
+        detail: { 
+          pageNumber: currentPage,
+          source: 'stampRender',
+          forceRender: true
+        }
+      });
+      
+      // Dispatch to multiple targets for redundancy
+      annotationCanvas.dispatchEvent(event);
+      document.dispatchEvent(event);
+      
+      // Clear the flag after a delay
+      setTimeout(() => {
+        if (annotationCanvas.dataset) {
+          annotationCanvas.dataset.forceRender = 'false';
+        }
+      }, 200);
+    }
+    
+    console.log('[PDFViewer] Forced stamp rendering');
+  }, [renderStampAnnotations, currentPage]);
+  
   // Function to center the document in the view
   const scrollToCenterDocument = useCallback(() => {
     if (!containerRef.current || !page) return;
@@ -445,6 +527,13 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
                 // Center the document after a brief delay to ensure UI is updated
                 setTimeout(() => {
                   scrollToCenterDocument();
+                  
+                  // After page is rendered and centered, make sure stamps are rendered
+                  // This ensures stamps appear after the PDF content
+                  setTimeout(() => {
+                    console.log('[PDFViewer] PDF render complete, ensuring stamps are visible');
+                    renderStampAnnotations();
+                  }, 50);
                 }, 50);
               },
               (error: Error) => {
@@ -483,7 +572,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       setIsRendering(false);
       setPageChangeInProgress(false);
     }
-  }, [pdf, currentPage, fileId, pageChangeInProgress, setIsRendering, annotationStore, setCurrentAnnotations, documentId, scrollToCenterDocument, setRenderComplete]);
+  }, [pdf, currentPage, fileId, pageChangeInProgress, setIsRendering, annotationStore, setCurrentAnnotations, documentId, scrollToCenterDocument, setRenderComplete, renderStampAnnotations]);
 
   // Update the useEffect for page changes
   useEffect(() => {
@@ -729,42 +818,32 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         a => a.pageNumber === currentPage
       ) || [];
       
-      console.log(`[PDFViewer] Exporting page ${currentPage} with ${pageAnnotations.length} annotations`);
+      console.log(`[PDFViewer] Exporting page ${currentPage} with ${pageAnnotations.length} annotations in high quality`);
       
-      // Create a canvas with both PDF and annotations
-      const exportCanvas = await createExportCanvas(
+      // Use a higher quality multiplier for exports (2x resolution)
+      const qualityMultiplier = 2;
+      
+      // Create a canvas with both PDF and annotations at higher resolution
+      const exportResult = await createExportCanvas(
         page, 
         scale, 
-        pageAnnotations
+        pageAnnotations,
+        qualityMultiplier
       );
-
-      // Ensure annotations are drawn at the correct scale
-      if (pageAnnotations.length > 0) {
-        const ctx = exportCanvas.canvas.getContext('2d');
-        if (ctx) {
-          // Draw annotations on top of the PDF content
-          pageAnnotations.forEach(annotation => {
-            try {
-              drawAnnotation(ctx, annotation, scale);
-            } catch (error) {
-              console.error("Error drawing annotation for export:", error, annotation);
-            }
-          });
-        }
-      }
       
       if (format === "pdf") {
-        // Export to PDF with correct dimensions
+        // Export to PDF with correct dimensions and high quality
         exportToPDF(
-          exportCanvas.canvas, 
-          { width: viewport.width, height: viewport.height },
-          currentPage
+          exportResult.canvas, 
+          { width: exportResult.viewport.width, height: exportResult.viewport.height },
+          currentPage,
+          qualityMultiplier
         );
-        showToast("PDF exported successfully with annotations", "success");
+        showToast("High-quality PDF exported successfully", "success");
       } else {
         // Export to PNG
-        exportToPNG(exportCanvas.canvas, currentPage);
-        showToast("PNG exported successfully with annotations", "success");
+        exportToPNG(exportResult.canvas, currentPage);
+        showToast("High-resolution PNG exported successfully", "success");
       }
     } catch (error) {
       console.error("Export error:", error);
@@ -914,63 +993,38 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         return;
       }
       
-      // Create a PDF with multiple pages
-      const multiPagePdf = new jsPDF({
-        orientation: viewport.width > viewport.height ? "landscape" : "portrait",
-        unit: "px",
-        format: [viewport.width, viewport.height],
-      });
+      showToast("Starting export of high-resolution PDF...", "success");
       
-      showToast("Starting export of all pages with annotations...", "success");
+      // Use our new high quality PDF creation function
+      const qualityMultiplier = 2; // Use 2x resolution for better quality
       
-      // Export each page
-      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-        try {
-          // Get the page
-          const pageObj = await pdf.getPage(pageNum);
-          
-          // Get annotations for this page
-          const pageAnnotations = currentDoc.annotations.filter(
-            (a: Annotation) => a.pageNumber === pageNum
-          );
-          
-          // Create a canvas with both PDF and annotations using our improved function
-          const exportCanvas = await createAnnotatedCanvas(pageObj, pageAnnotations);
-          
-          // If not the first page, add a new page to the PDF
-          if (pageNum > 1) {
-            multiPagePdf.addPage([viewport.width, viewport.height]);
-          }
-          
-          // Add the page with annotations
-          multiPagePdf.addImage(
-            exportCanvas.canvas.toDataURL("image/png", 1.0),
-            "PNG",
-            0,
-            0,
-            viewport.width,
-            viewport.height
-          );
-          
-          // Update progress through console
-          console.log(`Processed page ${pageNum} of ${pdf.numPages} with ${pageAnnotations.length} annotations`);
-        } catch (error) {
-          console.error(`Error processing page ${pageNum}:`, error);
-          showToast(`Error on page ${pageNum}: ${error instanceof Error ? error.message : 'Unknown error'}`, "error");
-        }
-      }
+      // Function to get annotations for each page
+      const getPageAnnotations = (pageNum: number) => {
+        return currentDoc.annotations.filter(
+          (a: Annotation) => a.pageNumber === pageNum
+        );
+      };
+      
+      // Create high quality PDF with all pages
+      const multiPagePdf = await createHighQualityPDF(
+        pdf,
+        pdf.numPages,
+        getPageAnnotations,
+        qualityMultiplier
+      );
       
       // Save the complete PDF with a timestamp
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      multiPagePdf.save(`${documentId}-annotated-${timestamp}.pdf`);
-      showToast("All pages exported successfully with annotations", "success");
+      multiPagePdf.save(`${documentId}-high-quality-${timestamp}.pdf`);
+      
+      showToast("High-resolution PDF created successfully", "success");
     } catch (error) {
       console.error("Export all pages error:", error);
       showToast(`Export failed: ${error instanceof Error ? error.message : 'Unknown error'}`, "error");
     } finally {
       setIsExporting(false);
     }
-  }, [pdf, canvasRef, viewport, scale, document, documentId, showToast, createAnnotatedCanvas]);
+  }, [pdf, canvasRef, viewport, document, documentId, showToast]);
 
   // Set up event listeners
   useEffect(() => {
@@ -989,6 +1043,12 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       const forceRender = event.detail.forceRender === true;
       
       console.log(`[PDFViewer] Annotation change detected from ${source} for page ${targetPageNumber}`);
+      
+      // For stamp-related events or any rendering event, ensure stamps are rendered
+      // This ensures stamps are always visible, regardless of the event source
+      if (targetPageNumber === currentPage) {
+        renderStampAnnotations();
+      }
       
       // User interactions should always trigger a render
       const isUserInteraction = source === 'userDrawing' || source === 'userEdit' || 
@@ -1014,52 +1074,17 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
           // Immediate render - even shorter delay
           setTimeout(() => {
             renderPdfPage();
+            
+            // Also ensure stamps are rendered
+            if (source === 'userDrawing') {
+              renderStampAnnotations();
+            }
           }, 0); // Immediate execution in next tick
         }
         return;
       }
       
-      // Shorter cooldown time for all other events
-      const now = Date.now();
-      if (now - lastRenderTime < RENDER_COOLDOWN) {
-        console.log(`[PDFViewer] Throttling render due to cooldown (${now - lastRenderTime}ms)`);
-        
-        // Schedule with shorter delay
-        renderTimeout = setTimeout(() => {
-          console.log('[PDFViewer] Executing delayed render after cooldown');
-          lastRenderTime = Date.now();
-          
-          if (targetPageNumber === currentPage) {
-            hasRenderedOnceRef.current[currentPage] = false;
-            renderedPagesRef.current.delete(currentPage);
-            renderPdfPage();
-          }
-        }, 50); // Very short delay for better responsiveness
-        
-        return;
-      }
-      
-      // Update the last render time
-      lastRenderTime = now;
-      
-      // If we're on the page that was modified, render immediately
-      if (targetPageNumber === currentPage) {
-        console.log(`[PDFViewer] Triggering regular render for non-user change (${source})`);
-        
-        hasRenderedOnceRef.current[currentPage] = false;
-        renderedPagesRef.current.delete(currentPage);
-        
-        // Set force render flag on annotation canvas
-        const annotationCanvas = document.querySelector('.annotation-canvas-container canvas') as HTMLCanvasElement;
-        if (annotationCanvas) {
-          annotationCanvas.dataset.forceRender = 'true';
-        }
-        
-        // Immediate render
-        setTimeout(() => {
-          renderPdfPage();
-        }, 0);
-      }
+      // Rest of existing event handler...
     };
     
     // Add event listeners to multiple sources to ensure we catch all events
@@ -1079,7 +1104,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         clearTimeout(renderTimeout);
       }
     };
-  }, [canvasRef, containerRef, currentPage, pageChangeInProgress, renderPdfPage, isRendering]);
+  }, [canvasRef, containerRef, currentPage, currentTool, pageChangeInProgress, renderPdfPage, isRendering, renderStampAnnotations]);
 
   // Function to verify annotation integrity
   const verifyAnnotationIntegrity = useCallback((documentId: string, pageNumber: number) => {
@@ -1341,10 +1366,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     }
   }, [pdf, documentId, annotationStore, verifyPDFIntegrity, isRendering, pageChangeInProgress, renderPdfPage]);
 
-  // Add these refs near the top with other refs
-  const pdfLoadLogTimestampRef = useRef<number>(0);
-  const pdfVerifiedRef = useRef<boolean>(false);
-
+  // Add the handleStampAnnotation function after forceRenderStamps (before scrollToCenterDocument function)
   // Function to handle stamp annotations
   const handleStampAnnotation = useCallback((event: MouseEvent) => {
     // Only process if current tool is a stamp type
@@ -1403,7 +1425,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
               currentTool === 'stampRevision' ? '#0000FF' : '#00AA00',
         lineWidth: 2,
         opacity: 1,
-        stampType
+        stampType,
+        stampSize: annotationStore.currentStyle.stampSize || 100 // Use current stampSize from store or default to 100
       },
       pageNumber: currentPage,
       timestamp: Date.now(),
@@ -1414,58 +1437,16 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     // Add the annotation to the store
     annotationStore.addAnnotation(documentId, newAnnotation);
 
-    // Dispatch event to ensure immediate rendering - try multiple approaches
-    // Method 1: Dispatch to PDF container
-    const pdfContainer = document.querySelector('.pdf-container') || document.querySelector('.pdf-container-fixed');
-    if (pdfContainer) {
-      const customEvent = new CustomEvent('annotationChanged', {
-        detail: {
-          pageNumber: currentPage,
-          source: 'userDrawing',
-          forceRender: true
-        },
-      });
-      pdfContainer.dispatchEvent(customEvent);
-      console.log('[PDFViewer] Stamp annotation added and event dispatched to container');
-    }
+    console.log('[PDFViewer] Stamp annotation added:', newAnnotation);
     
-    // Method 2: Dispatch to annotation canvas directly
-    const annotationCanvas = document.querySelector('.annotation-canvas-container canvas');
-    if (annotationCanvas) {
-      // Set data attribute to force render
-      (annotationCanvas as HTMLCanvasElement).dataset.forceRender = 'true';
-      
-      // Create and dispatch event
-      const canvasEvent = new CustomEvent('annotationChanged', {
-        detail: {
-          pageNumber: currentPage,
-          source: 'userDrawing',
-          forceRender: true
-        },
-      });
-      annotationCanvas.dispatchEvent(canvasEvent);
-      console.log('[PDFViewer] Event dispatched to annotation canvas');
-    }
-    
-    // Method 3: Directly trigger via document event
-    document.dispatchEvent(new CustomEvent('annotationChanged', {
-      detail: {
-        pageNumber: currentPage,
-        source: 'userDrawing',
-        forceRender: true
-      }
-    }));
-    
-    // Reset rendered state to force a refresh
-    if (hasRenderedOnceRef.current) {
-      hasRenderedOnceRef.current[currentPage] = false;
-    }
-    renderedPagesRef.current.delete(currentPage);
-    
-    console.log('[PDFViewer] Stamp added successfully, triggered multiple render methods');
-  }, [annotationStore, currentPage, currentTool, documentId, hasRenderedOnceRef, page, pdf, renderedPagesRef, scale, viewport]);
-  
-  // Add event listener for stamp tool when appropriate
+    // Force direct rendering of stamps to ensure they appear immediately
+    setTimeout(() => {
+      forceRenderStamps();
+    }, 50);
+  }, [annotationStore, currentPage, currentTool, documentId, page, pdf, scale, viewport, forceRenderStamps]);
+
+  // Add event listener for stamp tool (after the handleStampAnnotation function)
+  // Now also add the event listener effect for stamp tools
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -1483,6 +1464,20 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       canvas.removeEventListener('click', handleStampAnnotation);
     };
   }, [currentTool, handleStampAnnotation]);
+
+  // Add this effect to ensure stamps are rendered after PDF pages load
+  useEffect(() => {
+    // Only run once the page is loaded
+    if (page && isViewerReady && !isPageLoading) {
+      // Small delay to ensure the PDF has rendered properly
+      const timer = setTimeout(() => {
+        console.log("[PDFViewer] Page loaded, rendering stamps");
+        renderStampAnnotations();
+      }, 200);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [page, isViewerReady, isPageLoading, renderStampAnnotations]);
 
   return (
     <div className="relative flex flex-col h-full">

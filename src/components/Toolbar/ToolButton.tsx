@@ -2,6 +2,7 @@ import React, { useRef } from "react";
 import { useAnnotationStore } from "../../store/useAnnotationStore";
 import { AnnotationType } from "../../types/annotation";
 import { LucideProps } from "lucide-react";
+import { useShortcutPopup } from "../KeyboardShortcutPopup";
 
 interface ToolButtonProps {
   tool: AnnotationType;
@@ -74,33 +75,59 @@ export const ToolButton: React.FC<ToolButtonProps> = ({
   rightIcon: RightIconComponent,
 }) => {
   const { currentTool, setCurrentTool } = useAnnotationStore();
+  const { popupState, showPopup, hidePopup, ShortcutPopup } = useShortcutPopup();
+
+  const handleShortcutClick = (e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent tool selection
+    if (shortcut) {
+      showPopup(shortcut, e);
+    }
+  };
 
   return (
-    <button
-      onClick={() => {
-        setCurrentTool(tool);
-        onClick?.();
-        
-        // Dispatch event to trigger re-rendering of the PDF canvas
-        dispatchToolChangeEvent();
-      }}
-      className={`flex items-center gap-2 px-3 py-2 rounded-md w-full transition-colors ${
-        currentTool === tool
-          ? "bg-blue-50 text-blue-600"
-          : "text-gray-700 hover:bg-gray-50"
-      }`}
-      title={shortcut ? `${label} (${shortcut})` : label}
-    >
-      <div className="flex-1 flex items-center gap-2">
-        <IconComponent size={20} />
-        <span className="text-sm font-medium">{label}</span>
-        {RightIconComponent && (
-          <div className="ml-auto">
-            <RightIconComponent size={16} className="text-gray-400" />
-          </div>
+    <>
+      <button
+        onClick={() => {
+          setCurrentTool(tool);
+          onClick?.();
+          
+          // Dispatch event to trigger re-rendering of the PDF canvas
+          dispatchToolChangeEvent();
+        }}
+        className={`flex items-center gap-2 px-3 py-2 rounded-md w-full transition-colors ${
+          currentTool === tool
+            ? "bg-blue-50 text-blue-600"
+            : "text-gray-700 hover:bg-gray-50"
+        }`}
+        title={shortcut ? `${label} (${shortcut})` : label}
+      >
+        <div className="flex-1 flex items-center gap-2">
+          <IconComponent size={20} />
+          <span className="text-sm font-medium">{label}</span>
+          {RightIconComponent && (
+            <div className="ml-auto">
+              <RightIconComponent size={16} className="text-gray-400" />
+            </div>
+          )}
+        </div>
+        {shortcut && (
+          <span 
+            className="text-xs text-gray-400 px-1.5 py-0.5 bg-gray-100 rounded hover:bg-gray-200 cursor-pointer"
+            onClick={handleShortcutClick}
+          >
+            {shortcut}
+          </span>
         )}
-      </div>
-      {shortcut && <span className="text-xs text-gray-400">{shortcut}</span>}
-    </button>
+      </button>
+      {shortcut && (
+        <ShortcutPopup
+          shortcut={shortcut}
+          description={popupState.description}
+          isOpen={popupState.isOpen && popupState.shortcut === shortcut}
+          onClose={hidePopup}
+          position={popupState.position}
+        />
+      )}
+    </>
   );
 };

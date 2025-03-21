@@ -59,7 +59,6 @@ export function useDocumentManager(projectId: string) {
       const newDoc = await documentService.create(
         targetFolderId,
         {
-          projectId,
           name,
           type,
           folderId: targetFolderId,

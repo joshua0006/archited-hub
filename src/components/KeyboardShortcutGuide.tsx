@@ -31,12 +31,10 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
     shortcuts: [
       { label: "Undo", shortcut: KEYBOARD_SHORTCUTS.actions.undo },
       { label: "Redo", shortcut: KEYBOARD_SHORTCUTS.actions.redo },
-      { label: "Copy", shortcut: KEYBOARD_SHORTCUTS.actions.copy },
-      { label: "Paste", shortcut: KEYBOARD_SHORTCUTS.actions.paste },
-      { label: "Cut", shortcut: KEYBOARD_SHORTCUTS.actions.cut },
       { label: "Delete", shortcut: KEYBOARD_SHORTCUTS.actions.delete },
       { label: "Select All", shortcut: KEYBOARD_SHORTCUTS.actions.selectAll },
       { label: "Cancel/Deselect", shortcut: KEYBOARD_SHORTCUTS.actions.escape },
+      { label: "Clear All Highlights", shortcut: KEYBOARD_SHORTCUTS.actions.escape },
     ],
   },
 ];

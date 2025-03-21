@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import { OrganizationProvider } from "./contexts/OrganizationContext";
 import { AuthProvider } from "./contexts/AuthContext";
@@ -13,6 +13,8 @@ import { useKeyboardShortcutGuide } from "./hooks/useKeyboardShortcutGuide";
 import SharedContent from './components/SharedContent';
 import { Toolbar } from './components/Toolbar';
 import TokenUpload from './components/TokenUpload';
+import { setupEscKeyHighlightClear } from "./utils/clearHighlightedAnnotations";
+import { setupCopyPasteShortcuts } from "./utils/keyboardShortcuts";
 
 // Protected Route Component
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -41,6 +43,21 @@ export const App: React.FC = () => {
   );
   const { isShortcutGuideOpen, setIsShortcutGuideOpen } =
     useKeyboardShortcutGuide();
+
+  // Setup keyboard shortcuts
+  useEffect(() => {
+    // Setup ESC key handler for clearing highlight annotations
+    const cleanupEscKey = setupEscKeyHighlightClear();
+    
+    // Setup Copy/Paste keyboard shortcuts
+    const cleanupCopyPaste = setupCopyPasteShortcuts();
+    
+    // Return cleanup function for both handlers
+    return () => {
+      cleanupEscKey();
+      cleanupCopyPaste();
+    };
+  }, []);
 
   return (
     <BrowserRouter>

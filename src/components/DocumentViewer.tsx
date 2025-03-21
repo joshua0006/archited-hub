@@ -35,6 +35,7 @@ import {
   Timestamp,
   getDocs,
   getDoc,
+  where,
 } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { storage } from "../lib/firebase";
@@ -51,12 +52,15 @@ interface Document {
   version: number;
   url: string;
   dateModified: string;
-  folderId?: string;
-  projectId: string;
+  folderId: string;
   metadata?: {
     contentType?: string;
     size?: number;
     originalFilename?: string;
+    googleDriveId?: string;
+    createdAt?: string;
+    updatedAt?: string;
+    storagePath?: string;
   };
 }
 
@@ -580,7 +584,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
     try {
       setLoadingVersions(true);
       const fetchedVersions = await documentService.getVersions(
-        document.projectId,
+        document.folderId || '',
         document.id
       );
       setVersions(fetchedVersions.sort((a, b) => b.version - a.version));
@@ -660,12 +664,45 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
   };
 
   const handleAddAnnotation = () => {
-    // Implementation of handleAddAnnotation
+    console.log("Adding annotation");
   };
 
   const handleDownload = () => {
-    // Implementation of handleDownload
+    window.open(document.url, "_blank");
   };
+
+  useEffect(() => {
+    setComments([]);
+    setVersions([]);
+    setEditingCommentId(null);
+    setNewComment("");
+    setSubmittingComment(false);
+    
+    // Fetch document comments
+    if (document?.id) {
+      const q = query(
+        collection(db, "document_comments"),
+        where("documentId", "==", document.id),
+        orderBy("createdAt", "desc")
+      );
+      
+      const unsubscribeComments = onSnapshot(q, (snapshot) => {
+        const fetchedComments = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          userId: doc.data().userId,
+          userName: doc.data().userName,
+          text: doc.data().text,
+          createdAt: doc.data().createdAt?.toDate?.() || new Date(),
+          position: doc.data().position || { x: 0, y: 0, pageNumber: 1 },
+        }));
+        setComments(fetchedComments);
+      });
+      
+      return () => {
+        unsubscribeComments();
+      };
+    }
+  }, [document?.id]);
 
   return (
     <div className="flex flex-col h-full">

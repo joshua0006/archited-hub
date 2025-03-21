@@ -35,7 +35,15 @@ export type AnnotationStyle = {
   opacity: number;
   text?: string;
   stampType?: StampType;
+  stampSize?: number;
   circleDiameterMode?: boolean;
+  textOptions?: {
+    fontSize?: number;
+    fontFamily?: string;
+    bold?: boolean;
+    italic?: boolean;
+    underline?: boolean;
+  };
 };
 
 export interface Annotation {
@@ -72,10 +80,10 @@ export const createAnnotation = (type: AnnotationType): Annotation => {
     text: { color: "#000000", lineWidth: 2, opacity: 1 },
     stickyNote: { color: "#FFD700", lineWidth: 2, opacity: 1 },
     highlight: { color: "#FFFF00", lineWidth: 12, opacity: 0.3 },
-    stamp: { color: "#000000", lineWidth: 2, opacity: 1, stampType: "approved" },
-    stampApproved: { color: "#00AA00", lineWidth: 2, opacity: 1, stampType: "approved" },
-    stampRejected: { color: "#FF0000", lineWidth: 2, opacity: 1, stampType: "rejected" },
-    stampRevision: { color: "#0000FF", lineWidth: 2, opacity: 1, stampType: "revision" },
+    stamp: { color: "#000000", lineWidth: 2, opacity: 1, stampType: "approved", stampSize: 100 },
+    stampApproved: { color: "#00AA00", lineWidth: 2, opacity: 1, stampType: "approved", stampSize: 100 },
+    stampRejected: { color: "#FF0000", lineWidth: 2, opacity: 1, stampType: "rejected", stampSize: 100 },
+    stampRevision: { color: "#0000FF", lineWidth: 2, opacity: 1, stampType: "revision", stampSize: 100 },
     door: { color: "#000000", lineWidth: 2, opacity: 1 },
     window: { color: "#0000FF", lineWidth: 2, opacity: 1 },
     fireExit: { color: "#FF0000", lineWidth: 2, opacity: 1 },

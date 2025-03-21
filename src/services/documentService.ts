@@ -54,7 +54,7 @@ export const documentService = {
   ): Promise<Document> {
     try {
       // Check if name already exists in parent directory
-      const nameExists = await folderService.checkNameExists(document.projectId, document.name, folderId);
+      const nameExists = await this.checkNameExists(folderId, document.name);
       if (nameExists) {
         throw new Error(`A file or folder named "${document.name}" already exists in this location`);
       }
@@ -89,9 +89,11 @@ export const documentService = {
 
       // Create document in Firestore
       try {
-        const documentsRef = collection(db, 'documents');
+        // Use folder's documents subcollection
+        const folderRef = doc(db, 'folders', folderId);
+        const documentsRef = collection(folderRef, 'documents');
+        
         const docRef = await addDoc(documentsRef, {
-          projectId: document.projectId,
           name: document.name,
           type: document.type,
           folderId: folderId,
@@ -105,7 +107,10 @@ export const documentService = {
             originalFilename: file.name,
             contentType: file.type,
             size: file.size,
-            version: 1
+            version: 1,
+            storagePath,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
           }
         });
 
@@ -132,7 +137,6 @@ export const documentService = {
 
         // Update folder metadata
         try {
-          const folderRef = doc(db, 'folders', folderId);
           await updateDoc(folderRef, {
             'metadata.documentCount': increment(1),
             'metadata.lastUpdated': serverTimestamp()
@@ -145,7 +149,6 @@ export const documentService = {
 
         return {
           id: docRef.id,
-          projectId: document.projectId,
           name: document.name,
           type: document.type,
           folderId,
@@ -163,10 +166,32 @@ export const documentService = {
     }
   },
 
+  // Check if name exists in parent directory
+  async checkNameExists(folderId: string, name: string): Promise<boolean> {
+    try {
+      // Get folder reference
+      const folderRef = doc(db, 'folders', folderId);
+      
+      // Check documents with same name in folder's documents subcollection
+      const documentsRef = collection(folderRef, 'documents');
+      const documentsQuery = query(
+        documentsRef,
+        where('name', '==', name)
+      );
+      
+      const documentSnapshot = await getDocs(documentsQuery);
+      return !documentSnapshot.empty;
+    } catch (error) {
+      console.error('Error checking name existence:', error);
+      throw new Error('Failed to check name existence');
+    }
+  },
+
   // Update document metadata
   async update(folderId: string, documentId: string, updates: Partial<Document>): Promise<void> {
     try {
-      const documentRef = doc(db, 'documents', documentId);
+      const folderRef = doc(db, 'folders', folderId);
+      const documentRef = doc(collection(folderRef, 'documents'), documentId);
       const docSnap = await getDoc(documentRef);
       
       if (!docSnap.exists()) {
@@ -177,7 +202,7 @@ export const documentService = {
 
       // If name is being updated, check for conflicts
       if (updates.name && updates.name !== currentDoc.name) {
-        const nameExists = await folderService.checkNameExists(currentDoc.projectId, updates.name, folderId);
+        const nameExists = await this.checkNameExists(folderId, updates.name);
         if (nameExists) {
           throw new Error(`A file or folder named "${updates.name}" already exists in this location`);
         }
@@ -185,7 +210,8 @@ export const documentService = {
 
       await updateDoc(documentRef, {
         ...updates,
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
+        'metadata.updatedAt': new Date().toISOString()
       });
     } catch (error) {
       console.error('Error updating document:', error);
@@ -194,16 +220,17 @@ export const documentService = {
   },
 
   // Get version history for a document
-  async getVersions(projectId: string, documentId: string): Promise<any[]> {
+  async getVersions(folderId: string, documentId: string): Promise<any[]> {
     try {
-      const docRef = doc(db, 'documents', documentId);
-      const docSnap = await getDoc(docRef);
+      const folderRef = doc(db, 'folders', folderId);
+      const documentRef = doc(collection(folderRef, 'documents'), documentId);
+      const docSnap = await getDoc(documentRef);
       
       if (!docSnap.exists()) {
         throw new Error('Document not found');
       }
 
-      const versionsRef = collection(docRef, 'versions');
+      const versionsRef = collection(documentRef, 'versions');
       const q = query(versionsRef, orderBy('version', 'desc'));
       const snapshot = await getDocs(q);
       

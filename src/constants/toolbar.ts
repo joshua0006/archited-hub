@@ -1,13 +1,8 @@
 import {
-  DoorOpen,
-  Square,
-  Flame,
-  ArrowUpDown,
-  StepForward,
-  ShowerHead,
   MousePointer,
   Pencil,
   Highlighter,
+  Square,
   Circle,
   Triangle,
   Star,
@@ -15,10 +10,7 @@ import {
   ArrowUpRight,
   ArrowRightLeft,
   Type,
-  StickyNote,
-  CheckCircle2,
-  XCircle,
-  History
+  StickyNote
 } from "lucide-react";
 
 export const COLORS = [
@@ -46,9 +38,6 @@ export const KEYBOARD_SHORTCUTS = {
     arrow: "A",
     text: "T",
     highlight: "H",
-    approved: "1",
-    rejected: "2",
-    revision: "3",
   },
   actions: {
     undo: "Ctrl+Z",
@@ -57,11 +46,6 @@ export const KEYBOARD_SHORTCUTS = {
     delete: "Delete",
     selectAll: "Ctrl+A",
     escape: "Esc",
-    copy: "Ctrl+C",
-    paste: "Ctrl+V",
-    cut: "Ctrl+X",
-    bringToFront: "Ctrl+]",
-    sendToBack: "Ctrl+[",
   },
 } as const;
 
@@ -126,63 +110,5 @@ export const TOOLS = {
       shortcut: KEYBOARD_SHORTCUTS.tools.text,
     },
     { tool: "stickyNote", icon: StickyNote, label: "Sticky Note" },
-  ],
-  stamps: [
-    {
-      tool: "stampApproved",
-      icon: CheckCircle2,
-      label: "Approved",
-      shortcut: KEYBOARD_SHORTCUTS.tools.approved,
-    },
-    {
-      tool: "stampRejected",
-      icon: XCircle,
-      label: "Rejected",
-      shortcut: KEYBOARD_SHORTCUTS.tools.rejected,
-    },
-    {
-      tool: "stampRevision",
-      icon: History,
-      label: "Revision",
-      shortcut: KEYBOARD_SHORTCUTS.tools.revision,
-    },
-  ],
-  architectural: [
-    {
-      tool: "door",
-      icon: DoorOpen,
-      label: "Door",
-      rightIcon: DoorOpen,
-    },
-    {
-      tool: "window",
-      icon: Square,
-      label: "Window",
-      rightIcon: Square,
-    },
-    {
-      tool: "fireExit",
-      icon: Flame,
-      label: "Fire Exit",
-      rightIcon: Flame,
-    },
-    {
-      tool: "stairs",
-      icon: StepForward,
-      label: "Stairs",
-      rightIcon: StepForward,
-    },
-    {
-      tool: "elevator",
-      icon: ArrowUpDown,
-      label: "Elevator",
-      rightIcon: ArrowUpDown,
-    },
-    {
-      tool: "toilet",
-      icon: ShowerHead,
-      label: "Toilet",
-      rightIcon: ShowerHead,
-    },
   ],
 } as const;
